@@ -130,11 +130,17 @@ static const struct {
     #if CONFIG_LLVIDENCDSP
         { "llviddspenc", checkasm_check_llviddspenc },
     #endif
+    #if CONFIG_OPUS_DECODER
+        { "opusdsp", checkasm_check_opusdsp },
+    #endif
     #if CONFIG_PIXBLOCKDSP
         { "pixblockdsp", checkasm_check_pixblockdsp },
     #endif
     #if CONFIG_UTVIDEO_DECODER
         { "utvideodsp", checkasm_check_utvideodsp },
+    #endif
+    #if CONFIG_V210_DECODER
+        { "v210dec", checkasm_check_v210dec },
     #endif
     #if CONFIG_V210_ENCODER
         { "v210enc", checkasm_check_v210enc },
@@ -158,6 +164,12 @@ static const struct {
     #endif
     #if CONFIG_COLORSPACE_FILTER
         { "vf_colorspace", checkasm_check_colorspace },
+    #endif
+    #if CONFIG_EQ_FILTER
+        { "vf_eq", checkasm_check_vf_eq },
+    #endif
+    #if CONFIG_GBLUR_FILTER
+        { "vf_gblur", checkasm_check_vf_gblur },
     #endif
     #if CONFIG_HFLIP_FILTER
         { "vf_hflip", checkasm_check_vf_hflip },

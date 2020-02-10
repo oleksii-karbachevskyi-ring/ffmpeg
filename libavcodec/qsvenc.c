@@ -267,6 +267,11 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
 #endif
 #endif
 
+#if QSV_HAVE_GPB
+    if (avctx->codec_id == AV_CODEC_ID_HEVC)
+        av_log(avctx, AV_LOG_VERBOSE,"GPB: %s\n", print_threestate(co3->GPB));
+#endif
+
     if (avctx->codec_id == AV_CODEC_ID_H264) {
         av_log(avctx, AV_LOG_VERBOSE, "Entropy coding: %s; MaxDecFrameBuffering: %"PRIu16"\n",
                co->CAVLC == MFX_CODINGOPTION_ON ? "CAVLC" : "CABAC", co->MaxDecFrameBuffering);
@@ -572,7 +577,7 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
 
     //libmfx BRC parameters are 16 bits thus maybe overflow, then BRCParamMultiplier is needed
     buffer_size_in_kilobytes   = avctx->rc_buffer_size / 8000;
-    initial_delay_in_kilobytes = avctx->rc_initial_buffer_occupancy / 1000;
+    initial_delay_in_kilobytes = avctx->rc_initial_buffer_occupancy / 8000;
     target_bitrate_kbps        = avctx->bit_rate / 1000;
     max_bitrate_kbps           = avctx->rc_max_rate / 1000;
     brc_param_multiplier       = (FFMAX(FFMAX3(target_bitrate_kbps, max_bitrate_kbps, buffer_size_in_kilobytes),
@@ -629,9 +634,10 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
 #endif
     }
 
-    // the HEVC encoder plugin currently fails if coding options
-    // are provided
-    if (avctx->codec_id != AV_CODEC_ID_HEVC) {
+    // The HEVC encoder plugin currently fails with some old libmfx version if coding options
+    // are provided. Can't find the extract libmfx version which fixed it, just enable it from
+    // V1.28 in order to keep compatibility security.
+    if ((avctx->codec_id != AV_CODEC_ID_HEVC) || QSV_RUNTIME_VERSION_ATLEAST(q->ver, 1, 28)) {
         q->extco.Header.BufferId      = MFX_EXTBUFF_CODING_OPTION;
         q->extco.Header.BufferSz      = sizeof(q->extco);
 
@@ -747,6 +753,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #if QSV_HAVE_CO3
         q->extco3.Header.BufferId      = MFX_EXTBUFF_CODING_OPTION3;
         q->extco3.Header.BufferSz      = sizeof(q->extco3);
+#if QSV_HAVE_GPB
+        if (avctx->codec_id == AV_CODEC_ID_HEVC)
+            q->extco3.GPB              = q->gpb ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+#endif
         q->extparam_internal[q->nb_extparam_internal++] = (mfxExtBuffer *)&q->extco3;
 #endif
     }
@@ -944,29 +954,31 @@ static int qsvenc_init_session(AVCodecContext *avctx, QSVEncContext *q)
         if (!q->frames_ctx.hw_frames_ctx)
             return AVERROR(ENOMEM);
 
-        ret = ff_qsv_init_session_frames(avctx, &q->internal_session,
+        ret = ff_qsv_init_session_frames(avctx, &q->internal_qs.session,
                                          &q->frames_ctx, q->load_plugins,
-                                         q->param.IOPattern == MFX_IOPATTERN_IN_OPAQUE_MEMORY);
+                                         q->param.IOPattern == MFX_IOPATTERN_IN_OPAQUE_MEMORY,
+                                         MFX_GPUCOPY_OFF);
         if (ret < 0) {
             av_buffer_unref(&q->frames_ctx.hw_frames_ctx);
             return ret;
         }
 
-        q->session = q->internal_session;
+        q->session = q->internal_qs.session;
     } else if (avctx->hw_device_ctx) {
-        ret = ff_qsv_init_session_device(avctx, &q->internal_session,
-                                         avctx->hw_device_ctx, q->load_plugins);
+        ret = ff_qsv_init_session_device(avctx, &q->internal_qs.session,
+                                         avctx->hw_device_ctx, q->load_plugins,
+                                         MFX_GPUCOPY_OFF);
         if (ret < 0)
             return ret;
 
-        q->session = q->internal_session;
+        q->session = q->internal_qs.session;
     } else {
-        ret = ff_qsv_init_internal_session(avctx, &q->internal_session,
-                                           q->load_plugins);
+        ret = ff_qsv_init_internal_session(avctx, &q->internal_qs,
+                                           q->load_plugins, MFX_GPUCOPY_OFF);
         if (ret < 0)
             return ret;
 
-        q->session = q->internal_session;
+        q->session = q->internal_qs.session;
     }
 
     return 0;
@@ -1297,7 +1309,6 @@ static int encode_frame(AVCodecContext *avctx, QSVEncContext *q,
     if (qsv_frame) {
         surf = &qsv_frame->surface;
         enc_ctrl = &qsv_frame->enc_ctrl;
-        memset(enc_ctrl, 0, sizeof(mfxEncodeCtrl));
 
         if (frame->pict_type == AV_PICTURE_TYPE_I) {
             enc_ctrl->FrameType = MFX_FRAMETYPE_I | MFX_FRAMETYPE_REF;
@@ -1498,10 +1509,9 @@ int ff_qsv_enc_close(AVCodecContext *avctx, QSVEncContext *q)
 
     if (q->session)
         MFXVideoENCODE_Close(q->session);
-    if (q->internal_session)
-        MFXClose(q->internal_session);
+
     q->session          = NULL;
-    q->internal_session = NULL;
+    ff_qsv_close_internal_session(&q->internal_qs);
 
     av_buffer_unref(&q->frames_ctx.hw_frames_ctx);
     av_buffer_unref(&q->frames_ctx.mids_buf);

@@ -455,6 +455,9 @@ enum AVCodecID {
     AV_CODEC_ID_HYMT,
     AV_CODEC_ID_ARBC,
     AV_CODEC_ID_AGM,
+    AV_CODEC_ID_LSCR,
+    AV_CODEC_ID_VP4,
+    AV_CODEC_ID_IMM5,
 
     /* various PCM "codecs" */
     AV_CODEC_ID_FIRST_AUDIO = 0x10000,     ///< A dummy id pointing at the start of audio codecs
@@ -539,6 +542,7 @@ enum AVCodecID {
     AV_CODEC_ID_ADPCM_AICA,
     AV_CODEC_ID_ADPCM_IMA_DAT4,
     AV_CODEC_ID_ADPCM_MTAF,
+    AV_CODEC_ID_ADPCM_AGM,
 
     /* AMR */
     AV_CODEC_ID_AMR_NB = 0x12000,
@@ -649,6 +653,7 @@ enum AVCodecID {
     AV_CODEC_ID_SBC,
     AV_CODEC_ID_ATRAC9,
     AV_CODEC_ID_HCOM,
+    AV_CODEC_ID_ACELP_KELVIN,
 
     /* subtitle codecs */
     AV_CODEC_ID_FIRST_SUBTITLE = 0x17000,          ///< A dummy ID pointing at the start of subtitle codecs.
@@ -685,6 +690,7 @@ enum AVCodecID {
     AV_CODEC_ID_TTF = 0x18000,
 
     AV_CODEC_ID_SCTE_35, ///< Contain timestamp estimated through PCR of program stream.
+    AV_CODEC_ID_EPG,
     AV_CODEC_ID_BINTEXT    = 0x18800,
     AV_CODEC_ID_XBIN,
     AV_CODEC_ID_IDF,
@@ -857,6 +863,11 @@ typedef struct RcOverride{
  * Use qpel MC.
  */
 #define AV_CODEC_FLAG_QPEL            (1 <<  4)
+/**
+ * Don't output frames whose parameters differ from first
+ * decoded frame in stream.
+ */
+#define AV_CODEC_FLAG_DROPCHANGED     (1 <<  5)
 /**
  * Use internal 2pass ratecontrol in first pass mode.
  */
@@ -2049,15 +2060,19 @@ typedef struct AVCodecContext {
 
     /**
      * custom intra quantization matrix
-     * - encoding: Set by user, can be NULL.
-     * - decoding: Set by libavcodec.
+     * Must be allocated with the av_malloc() family of functions, and will be freed in
+     * avcodec_free_context().
+     * - encoding: Set/allocated by user, freed by libavcodec. Can be NULL.
+     * - decoding: Set/allocated/freed by libavcodec.
      */
     uint16_t *intra_matrix;
 
     /**
      * custom inter quantization matrix
-     * - encoding: Set by user, can be NULL.
-     * - decoding: Set by libavcodec.
+     * Must be allocated with the av_malloc() family of functions, and will be freed in
+     * avcodec_free_context().
+     * - encoding: Set/allocated by user, freed by libavcodec. Can be NULL.
+     * - decoding: Set/allocated/freed by libavcodec.
      */
     uint16_t *inter_matrix;
 
@@ -3358,6 +3373,14 @@ typedef struct AVCodecContext {
      * - encoding: unused
      */
     int discard_damaged_percentage;
+
+    /**
+     * The number of samples per frame to maximally accept.
+     *
+     * - decoding: set by user
+     * - encoding: set by user
+     */
+    int64_t max_samples;
 } AVCodecContext;
 
 #if FF_API_CODEC_GET_SET
@@ -4410,7 +4433,7 @@ int av_grow_packet(AVPacket *pkt, int grow_by);
  * Initialize a reference-counted packet from av_malloc()ed data.
  *
  * @param pkt packet to be initialized. This function will set the data, size,
- *        buf and destruct fields, all others are left untouched.
+ *        and buf fields, all others are left untouched.
  * @param data Data allocated by av_malloc() to be used as packet data. If this
  *        function returns successfully, the data is owned by the underlying AVBuffer.
  *        The caller may not access the data through other means.
@@ -4916,6 +4939,9 @@ int avcodec_send_packet(AVCodecContext *avctx, const AVPacket *avpkt);
  *      AVERROR_EOF:       the decoder has been fully flushed, and there will be
  *                         no more output frames
  *      AVERROR(EINVAL):   codec not opened, or it is an encoder
+ *      AVERROR_INPUT_CHANGED:   current decoded frame has changed parameters
+ *                               with respect to first decoded frame. Applicable
+ *                               when flag AV_CODEC_FLAG_DROPCHANGED is set.
  *      other negative values: legitimate decoding errors
  */
 int avcodec_receive_frame(AVCodecContext *avctx, AVFrame *frame);

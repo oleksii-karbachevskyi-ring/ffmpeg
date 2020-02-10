@@ -54,7 +54,7 @@ AVPacket *av_packet_alloc(void)
     if (!pkt)
         return pkt;
 
-    av_packet_unref(pkt);
+    av_init_packet(pkt);
 
     return pkt;
 }
@@ -522,11 +522,12 @@ fail:
 
 int av_packet_unpack_dictionary(const uint8_t *data, int size, AVDictionary **dict)
 {
-    const uint8_t *end = data + size;
+    const uint8_t *end;
     int ret = 0;
 
     if (!dict || !data || !size)
         return ret;
+    end = data + size;
     if (size && end[-1])
         return AVERROR_INVALIDDATA;
     while (data < end) {
